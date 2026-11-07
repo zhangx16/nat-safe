@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "utc": "2026-11-07T00:00:00+00:00",
   "hostname": "example-host",
   "mode": "audit",
@@ -29,6 +29,21 @@
         "cpu_pct": 0.3
       },
       "status": "needs_review"
+    },
+    {
+      "rule": "protocol-http",
+      "title": "观察到明文 HTTP 入站",
+      "severity": "info",
+      "scope": "demo-container",
+      "kind": "network",
+      "evidence": {
+        "protocol": "http",
+        "host_port": 30000,
+        "guest_port": 8080,
+        "observed_packets": 2,
+        "payload_saved": false
+      },
+      "status": "observation"
     }
   ],
   "startup_coverage": [],
@@ -37,5 +52,18 @@
   "geo_provider": "none",
   "top_cpu": [],
   "actions": [],
-  "errors": []
+  "errors": [],
+  "rfw_coverage": {
+    "capture": {
+      "enabled": true,
+      "interface": "example0",
+      "sampled_packets": 10,
+      "payload_saved": false
+    },
+    "country_policy": {
+      "mode": "off"
+    },
+    "smtp": "destination-port heuristic"
+  },
+  "rfw_port_access": []
 }

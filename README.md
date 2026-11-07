@@ -24,6 +24,20 @@ sudo python3 nat_safe.py --config ./config.json \
   --output /root/nat-safe-reports --state-dir /root/nat-safe-state
 ```
 
+## RFW 规则扩展（v0.2）
+
+已核对 Rust Firewall 的 README 与实际源码，并合入：默认 SMTP 外连端口检查、可选国家黑白名单审计、短时 HTTP/SOCKS5/WireGuard/QUIC 协议观察、可选 FET 统计推断，以及现有 RFW 端口访问统计导入。详见 [RFW 规则对照与限制](docs/rfw-rules.md)。
+
+```bash
+# 显式启用被动采样；eth0 请替换为实际公网网卡名
+sudo python3 nat_safe.py --capture-interface eth0 --capture-seconds 5
+
+# 导入现有 RFW 的未分组统计，不启动或修改防火墙
+sudo python3 nat_safe.py --rfw-stats /root/rfw-stats.txt
+```
+
+默认仍不抓包、不拦截。协议存在不自动等同滥用，FET 不证明某种代理；历史 Blocked 次数不会当作客户在线数。
+
 ## 检测范围
 
 `rules.json` 包含用户指定的 14 类可编辑规则：发包工具、扫描工具、Flood/DDoS、代理面板、挖矿、机场对接后端、弱加密参数、DD 重装、MTProto、跑分压测、无头浏览器、爆破撞库、传统 VPN、SOCKS/开放代理程序。正则默认不区分大小写。
@@ -125,7 +139,7 @@ journalctl -u nat-safe.service
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m py_compile nat_safe.py
+python3 -m py_compile nat_safe.py rfw_audit.py
 ```
 
 覆盖误报过滤、规则、凭据脱敏、IPv6、入站/出站区分、持续多地区阈值、地区未知、白名单到期、宿主机保护、PID 过期保护和报告权限/HTML 转义。`examples/` 只有合成数据，不含客户信息。

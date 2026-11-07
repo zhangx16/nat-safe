@@ -8,6 +8,10 @@ python3 -c 'import sys; assert sys.version_info >= (3, 9), "需要 Python 3.9+"'
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 install -d -m 755 /opt/nat-safe
 install -m 755 "$source_dir/nat_safe.py" /opt/nat-safe/nat_safe.py
+install -m 644 "$source_dir/rfw_audit.py" /opt/nat-safe/rfw_audit.py
+install -d -m 755 /opt/nat-safe/third_party /opt/nat-safe/docs
+install -m 644 "$source_dir/third_party/RFW-LICENSE-MIT.txt" /opt/nat-safe/third_party/RFW-LICENSE-MIT.txt
+install -m 644 "$source_dir/docs/rfw-rules.md" /opt/nat-safe/docs/rfw-rules.md
 install -m 644 "$source_dir/rules.json" /opt/nat-safe/rules.json
 install -d -m 700 /etc/nat-safe /var/log/nat-safe /var/lib/nat-safe
 if [[ ! -e /etc/nat-safe/config.json ]]; then

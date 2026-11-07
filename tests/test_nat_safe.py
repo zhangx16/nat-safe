@@ -3,9 +3,11 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import sys
 import unittest
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).parents[1]))
 spec = importlib.util.spec_from_file_location('nat_safe', Path(__file__).parents[1] / 'nat_safe.py')
 n = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(n)
@@ -162,6 +164,21 @@ class NatSafeTests(unittest.TestCase):
         with patch.object(n,'narwhal_ports',return_value={('udp',30000):('c',443)}),patch.object(n.shutil,'which',return_value='/usr/sbin/conntrack'):
             _,clients,_=n.collect_network([],R(),self.cfg,'/nonexistent')
         self.assertEqual(clients['c'],{'1.1.1.1'})
+
+    def test_smtp_direction_and_imap_exclusion(self):
+        class R(n.Runner):
+            def run(self, argv, **kw):
+                if argv == ['ss','-Hlnt']: return 'LISTEN 0 10 0.0.0.0:25 0.0.0.0:*\n'
+                if argv == ['ss','-Htan']:
+                    return ('ESTAB 0 0 10.0.0.1:40000 8.8.8.8:587\n'
+                            'ESTAB 0 0 10.0.0.1:25 1.1.1.1:59000\n'
+                            'ESTAB 0 0 10.0.0.1:40001 9.9.9.9:993\n'
+                            'SYN-SENT 0 0 10.0.0.1:40002 8.8.8.8:25\n')
+                return ''
+        with patch.object(n,'narwhal_ports',return_value={}),patch.object(n.shutil,'which',return_value=None):
+            network,_,_=n.collect_network([],R(),self.cfg,'/nonexistent')
+        self.assertEqual({x['remote_port'] for x in network[0]['smtp_outbound']},{25,587})
+        self.assertEqual(len(network[0]['smtp_outbound']),2)
 
 
 if __name__=='__main__': unittest.main()

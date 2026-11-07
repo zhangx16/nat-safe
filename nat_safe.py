@@ -19,13 +19,15 @@ import sys
 import time
 import urllib.request
 
-VERSION = '0.1.0'
+import rfw_audit
+
+VERSION = '0.2.0'
 BASE = Path(__file__).resolve().parent
 DEFAULTS = dict(exclude_client_ports=[22, 8792], min_client_ips=5,
                 min_geo_regions=3, min_consecutive_samples=3,
                 min_geo_duration_seconds=120, geo_level='country',
                 max_geo_lookups=100, max_startup_files=3000, max_file_bytes=262144,
-                allowlist=[])
+                allowlist=[], country_policy={'mode': 'off', 'countries': [], 'containers': []})
 START_DIRS = ['etc/systemd/system', 'etc/init.d', 'etc/local.d', 'etc/cron.d',
               'etc/crontabs', 'var/spool/cron', 'etc/periodic']
 BOOT_ID = Path('/proc/sys/kernel/random/boot_id')
@@ -392,6 +394,10 @@ def collect_network(containers, runner, cfg, db_path):
         ports = {r['local_port'] for r in listeners} - excluded
         rows = host if c['id'] == 'HOST' else socket_rows(runner.run(prefix + ['ss', '-Htan']))
         states = collections.Counter(r['state'] for r in rows)
+        smtp = [dict(remote_ip=r['remote_ip'], remote_port=r['remote_port'], state=r['state'])
+                for r in rows if r['state'] in ('ESTAB', 'SYN-SENT')
+                and r['remote_port'] in rfw_audit.SMTP_PORTS and r['local_port'] not in ports
+                and public_ip(r['remote_ip'])]
         peers = set()
         for row in rows:
             peer = public_ip(row['remote_ip'])
@@ -400,7 +406,7 @@ def collect_network(containers, runner, cfg, db_path):
                 if row['local_port'] in ports:
                     clients[c['id']].add(peer)
         stats.append(dict(scope=c['id'], tcp_states=dict(states), public_tcp_peers=len(peers),
-                          listening_tcp_ports=sorted(ports)))
+                          listening_tcp_ports=sorted(ports), smtp_outbound=smtp[:100]))
     # UDP DNAT attribution, when conntrack is installed. Only original client tuples are used.
     udp_available = bool(shutil.which('conntrack'))
     if udp_available:
@@ -625,6 +631,12 @@ def format_report(report):
               '- 默认不联网查 IP；无地区资料时会标记证据不足。',
               '- UDP 依赖 conntrack；单次快照无法证明历史行为，隧道可能隐藏用户。',
               '- 未扫描全部磁盘文件、用户 shell 历史、所有应用配置或远端业务。',
+              '- HTTP/SOCKS5/WireGuard/QUIC 是协议观察，不自动等同违规；FET 只是统计推断。',
+              '- RFW 累积访问计数不当作活跃用户，受攻击的容器不因被阻断访问而受罚。',
+              '', '## RFW 扩展覆盖', '', '```json',
+              json.dumps(report.get('rfw_coverage', {}), ensure_ascii=False, indent=2), '```',
+              '', '## RFW 历史端口访问计数', '', '```json',
+              json.dumps(report.get('rfw_port_access', []), ensure_ascii=False, indent=2), '```',
               '', '## 处置记录', '', '```json', json.dumps(report['actions'], ensure_ascii=False, indent=2), '```',
               '', '## 采集异常', '', '```json', json.dumps(report['errors'], ensure_ascii=False, indent=2), '```']
     return '\n'.join(lines) + '\n'
@@ -649,6 +661,16 @@ def validate_config(cfg):
         raise ValueError('allowlist must be a list of objects')
     if not isinstance(cfg['exclude_client_ports'], list) or not all(type(x) is int and 1 <= x <= 65535 for x in cfg['exclude_client_ports']):
         raise ValueError('exclude_client_ports must be a port list')
+    policy = cfg['country_policy']
+    if not isinstance(policy, dict) or policy.get('mode', 'off') not in ('off', 'allow', 'deny'):
+        raise ValueError('country_policy.mode must be off, allow or deny')
+    countries = policy.get('countries', [])
+    if not isinstance(countries, list) or not all(isinstance(x, str) and re.fullmatch('[A-Z]{2}', x) for x in countries):
+        raise ValueError('country_policy.countries must contain uppercase two-letter country codes')
+    if policy.get('mode', 'off') != 'off' and not countries:
+        raise ValueError('Enabled country policy requires at least one country')
+    if not isinstance(policy.get('containers', []), list) or not all(isinstance(x, str) for x in policy.get('containers', [])):
+        raise ValueError('country_policy.containers must be a list of exact container IDs')
 
 
 def scan(args, cfg, rules, runner, state_dir):
@@ -668,17 +690,39 @@ def scan(args, cfg, rules, runner, state_dir):
     sh, coverage = startup_findings(cs, rules, cfg, runner)
     hits += sh
     net, clients, nc = collect_network(cs, runner, cfg, args.narwhal_db)
+    hits += rfw_audit.smtp_findings(net)
     previous = load_json(state_dir / 'geo-history.json', {})
     geo = Geo(args.geo_provider, args.geo_db, state_dir, cfg, runner.errors)
     gh, history = geo_findings(clients, geo, cfg, previous, time.time())
+    ch, country_coverage = rfw_audit.country_findings(clients, geo, cfg['country_policy'])
+    hits += ch
     geo.save()
     atomic_text(state_dir / 'geo-history.json', json.dumps(history))
     hits += gh
+    capture_coverage = dict(enabled=False, reason='Use --capture-interface to explicitly enable passive sampling')
+    forwards = narwhal_ports(args.narwhal_db, runner.errors)
+    if args.capture_interface:
+        ph, capture_coverage = rfw_audit.capture(args.capture_interface, args.capture_seconds,
+            args.max_packets, args.fet_mode, forwards, cs, set(cfg['exclude_client_ports']), runner.errors)
+        hits += ph
+    port_access = []
+    if args.rfw_stats:
+        p = Path(args.rfw_stats)
+        if p.stat().st_size > 8 * 1024 * 1024:
+            raise ValueError('RFW stats import exceeds 8 MiB')
+        counters = load_json(state_dir / 'rfw-counters.json', {})
+        port_access, counters = rfw_audit.parse_rfw_stats(p.read_text(), forwards, cs, counters)
+        atomic_text(state_dir / 'rfw-counters.json', json.dumps(counters))
+        if not port_access:
+            runner.errors.append(dict(command='rfw_stats_import', error='no valid ungrouped records found'))
     apply_policy(hits, cfg)
     report = dict(version=VERSION, utc=utc(), hostname=socket.gethostname(), mode='enforce' if args.enforce else 'audit',
                   containers=[{k: c[k] for k in ('id', 'name', 'runtime', 'state', 'pid')} for c in cs],
                   process_count=len(procs), findings=hits, startup_coverage=coverage, network=net,
                   network_coverage=nc, geo_provider='offline' if args.geo_db else args.geo_provider,
+                  rfw_coverage=dict(capture=capture_coverage, country_policy=country_coverage,
+                                    smtp='TCP destination-port heuristic; not spam proof',
+                                    port_access_import=bool(args.rfw_stats)), rfw_port_access=port_access,
                   top_cpu=[{k: p[k] for k in ('pid', 'comm', 'scope', 'cpu_pct', 'rss_mib')}
                            for p in sorted(procs.values(), key=lambda p: p['cpu_pct'], reverse=True)[:15]],
                   actions=[], errors=runner.errors)
@@ -697,6 +741,11 @@ def parser():
     p.add_argument('--geo-provider', choices=['none', 'ipwhois'], default='none',
                    help='ipwhois sends public client IPs to ipwho.is over HTTPS; optional')
     p.add_argument('--geo-db', help='Offline MaxMind database; requires optional maxminddb Python package')
+    p.add_argument('--capture-interface', help='Explicit bounded passive protocol sampling on this interface')
+    p.add_argument('--capture-seconds', type=float, default=5)
+    p.add_argument('--max-packets', type=int, default=5000)
+    p.add_argument('--fet-mode', choices=['off', 'loose', 'strict'], default='off')
+    p.add_argument('--rfw-stats', help='Import a saved, ungrouped rfw stats text file; historical counters only')
     p.add_argument('--enforce', action='store_true')
     p.add_argument('--select', action='append', help='Exact container ID/name; repeatable')
     p.add_argument('--rule', action='append', help='Reviewed policy rule ID; repeatable')
@@ -713,6 +762,10 @@ def main(argv=None):
         raise ValueError('Run as root to inspect container processes and namespaces')
     if not 0.1 <= args.sample_seconds <= 60 or args.watch < 0 or (args.watch and args.watch < 10) or args.retention_days < 1:
         raise ValueError('Invalid sample/interval/retention value')
+    if not 0.1 <= args.capture_seconds <= 30 or not 1 <= args.max_packets <= 100000:
+        raise ValueError('Capture requires 0.1..30 seconds and 1..100000 packets')
+    if args.fet_mode != 'off' and not args.capture_interface:
+        raise ValueError('--fet-mode requires explicit --capture-interface')
     if args.enforce and (not args.select or not args.rule):
         raise ValueError('--enforce requires explicit --select and --rule; HOST is always protected')
     cfg = {**DEFAULTS, **load_json(args.config, {})} if args.config else dict(DEFAULTS)
