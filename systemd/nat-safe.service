@@ -1,0 +1,13 @@
+[Unit]
+Description=NAT Safe container abuse audit (read only)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/usr/bin/python3 /opt/nat-safe/nat_safe.py --config /etc/nat-safe/config.json
+# Host /proc, runtime sockets and network namespaces must remain visible.
+# Do not set PrivateUsers/PrivateNetwork/ProtectProc for this collector.

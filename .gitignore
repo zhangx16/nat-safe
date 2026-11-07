@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+reports/
+state/
+config.json
+*.mmdb
+.env

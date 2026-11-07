@@ -1,0 +1,11 @@
+[Unit]
+Description=Run NAT Safe audit every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=60s
+AccuracySec=5s
+Unit=nat-safe.service
+
+[Install]
+WantedBy=timers.target

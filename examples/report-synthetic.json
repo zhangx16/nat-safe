@@ -1,0 +1,41 @@
+{
+  "version": "0.1.0",
+  "utc": "2026-11-07T00:00:00+00:00",
+  "hostname": "example-host",
+  "mode": "audit",
+  "containers": [
+    {
+      "id": "demo-container",
+      "name": "demo-container",
+      "runtime": "podman",
+      "state": "running",
+      "pid": 12345
+    }
+  ],
+  "process_count": 100,
+  "findings": [
+    {
+      "rule": "proxy-panel",
+      "title": "代理面板",
+      "severity": "medium",
+      "scope": "demo-container",
+      "kind": "process",
+      "evidence": {
+        "pid": 12345,
+        "comm": "x-ui",
+        "exe": "/usr/local/x-ui/x-ui",
+        "start_ticks": 1000,
+        "rss_mib": 20,
+        "cpu_pct": 0.3
+      },
+      "status": "needs_review"
+    }
+  ],
+  "startup_coverage": [],
+  "network": [],
+  "network_coverage": {},
+  "geo_provider": "none",
+  "top_cpu": [],
+  "actions": [],
+  "errors": []
+}
