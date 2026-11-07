@@ -2,7 +2,7 @@
 set -euo pipefail
 [[ ${EUID} -eq 0 ]] || { echo '请以 root 运行' >&2; exit 1; }
 [[ $# -eq 0 || ( $# -eq 1 && $1 == --timer ) ]] || { echo '用法: bash install.sh [--timer]' >&2; exit 1; }
-command -v python3 >/dev/null
+command -v python3 >/dev/null || { echo '缺少 python3；Debian/Ubuntu 可执行 apt-get install python3' >&2; exit 1; }
 command -v ss >/dev/null || { echo '需要 iproute2 提供的 ss' >&2; exit 1; }
 python3 -c 'import sys; assert sys.version_info >= (3, 9), "需要 Python 3.9+"'
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)

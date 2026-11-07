@@ -8,11 +8,32 @@
 
 依赖：Linux、root、Python **3.9+**、`ss`（iproute2）；容器使用原有管理命令。无需 pip 即可完成基础检查。
 
+下面以 **root 用户、Debian/Ubuntu** 为例，先安装依赖（root 无需 `sudo`）：
+
 ```bash
-git clone https://github.com/zhangx16/nat-safe.git
-cd nat-safe
-sudo python3 nat_safe.py
+apt-get update && apt-get install -y git python3 iproute2 ca-certificates
 ```
+
+然后下载并检查；使用 `&&` 确保下载失败时不会继续运行后面的命令：
+
+```bash
+git clone https://github.com/zhangx16/nat-safe.git &&
+cd nat-safe &&
+python3 nat_safe.py
+```
+
+**免 Git 下载方式**：安装 `curl`、`tar`、`python3`、`iproute2`、`ca-certificates` 后，可直接下载完整项目压缩包（不能只下载 `nat_safe.py`，它还依赖同目录模块和规则文件）：
+
+```bash
+apt-get update && apt-get install -y curl tar python3 iproute2 ca-certificates &&
+work_dir="$(mktemp -d /root/nat-safe-download.XXXXXX)" &&
+curl -fL --retry 3 https://codeload.github.com/zhangx16/nat-safe/tar.gz/refs/heads/main -o "$work_dir/source.tar.gz" &&
+tar -xzf "$work_dir/source.tar.gz" -C "$work_dir" &&
+cd "$work_dir/nat-safe-main" &&
+python3 nat_safe.py
+```
+
+如果出现 `git: command not found`，说明 Git 尚未安装，后续 `cd` 和脚本不存在是下载失败的连带错误；先执行依赖安装命令。其他发行版使用其包管理器安装相应依赖，不要在非 Debian/Ubuntu 上直接执行 `apt-get`。已有 `nat-safe` 仓库时，进入目录执行 `git pull` 更新，无需再次 clone。
 
 默认报告：`/var/log/nat-safe/report-*.{json,md,html}`；状态与缓存：`/var/lib/nat-safe/`。目录权限 700、文件 600，默认保留 30 天。报告包含真实 IP 和容器标识，**不要提交到公开仓库**。HTML 报告可下载到本地打开。
 
